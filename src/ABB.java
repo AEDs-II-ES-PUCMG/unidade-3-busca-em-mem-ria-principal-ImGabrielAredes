@@ -101,6 +101,59 @@ public class ABB<K, V> implements IMapeamento<K, V> {
 		return (this.raiz == null);
 	}
 
+	protected No<K, V> inserir(No<K, V> raizArvore, K chave, V item) {
+		if (raizArvore == null) {
+			tamanho++;
+			return new No<>(chave, item);
+		}
+
+		int comparacao = comparador.compare(chave, raizArvore.getChave());
+		if (comparacao < 0)
+			raizArvore.setEsquerda(inserir(raizArvore.getEsquerda(), chave, item));
+		else if (comparacao > 0)
+			raizArvore.setDireita(inserir(raizArvore.getDireita(), chave, item));
+		else
+			raizArvore.setItem(item);
+
+		return raizArvore;
+	}
+
+	protected No<K, V> removerNoAntecessor(No<K, V> itemRetirar, No<K, V> raizArvore) {
+		if (raizArvore.getDireita() != null) {
+			raizArvore.setDireita(removerNoAntecessor(itemRetirar, raizArvore.getDireita()));
+			return raizArvore;
+		}
+
+		itemRetirar.setChave(raizArvore.getChave());
+		itemRetirar.setItem(raizArvore.getItem());
+		tamanho--;
+		return raizArvore.getEsquerda();
+	}
+
+	protected No<K, V> remover(No<K, V> raizArvore, K chaveRemover) {
+		if (raizArvore == null)
+			throw new NoSuchElementException("O item não foi localizado na árvore!");
+
+		int comparacao = comparador.compare(chaveRemover, raizArvore.getChave());
+		if (comparacao < 0) {
+			raizArvore.setEsquerda(remover(raizArvore.getEsquerda(), chaveRemover));
+		} else if (comparacao > 0) {
+			raizArvore.setDireita(remover(raizArvore.getDireita(), chaveRemover));
+		} else {
+			if (raizArvore.getEsquerda() == null) {
+				tamanho--;
+				return raizArvore.getDireita();
+			} else if (raizArvore.getDireita() == null) {
+				tamanho--;
+				return raizArvore.getEsquerda();
+			} else {
+				raizArvore.setEsquerda(removerNoAntecessor(raizArvore, raizArvore.getEsquerda()));
+			}
+		}
+
+		return raizArvore;
+	}
+
 	@Override
 	/**
 	 * Método que encapsula a pesquisa recursiva de itens na árvore.
@@ -109,6 +162,8 @@ public class ABB<K, V> implements IMapeamento<K, V> {
 	 * @return o valor associado à chave.
 	 */
 	public V pesquisar(K chave) {
+		if (chave == null)
+			throw new IllegalArgumentException("Chave de pesquisa não pode ser null");
 		comparacoes = 0;
 		inicio = System.nanoTime();
 		V procurado = pesquisar(raiz, chave);
@@ -122,22 +177,18 @@ public class ABB<K, V> implements IMapeamento<K, V> {
 
 		comparacoes++;
 		if (raizArvore == null)
-			/// Se a raiz da árvore ou sub-árvore for null, a árvore/sub-árvore está vazia e
-			/// então o item não foi encontrado.
+
 			throw new NoSuchElementException("O item não foi localizado na árvore!");
 
 		comparacao = comparador.compare(procurado, raizArvore.getChave());
 
 		if (comparacao == 0)
-			/// O item procurado foi encontrado.
 			return raizArvore.getItem();
 		else if (comparacao < 0)
-			/// Se o item procurado for menor do que o item armazenado na raiz da árvore:
-			/// pesquise esse item na sub-árvore esquerda.
+
 			return pesquisar(raizArvore.getEsquerda(), procurado);
 		else
-			/// Se o item procurado for maior do que o item armazenado na raiz da árvore:
-			/// pesquise esse item na sub-árvore direita.
+
 			return pesquisar(raizArvore.getDireita(), procurado);
 	}
 
@@ -153,7 +204,9 @@ public class ABB<K, V> implements IMapeamento<K, V> {
 	 *         inserção.
 	 */
 	public int inserir(K chave, V item) {
-		// TODO
+		if (chave == null)
+			throw new IllegalArgumentException("Chave de inserção não pode ser null");
+		this.raiz = inserir(this.raiz, chave, item);
 		return tamanho;
 	}
 
@@ -164,8 +217,19 @@ public class ABB<K, V> implements IMapeamento<K, V> {
 
 	@Override
 	public String percorrer() {
-		// TODO
-		return null;
+		if (vazia())
+			return "A árvore está vazia!";
+		return percorrer(this.raiz);
+	}
+
+	private String percorrer(No<K, V> nodo) {
+		if (nodo == null)
+			return "";
+		StringBuilder resultado = new StringBuilder();
+		resultado.append(percorrer(nodo.getEsquerda()));
+		resultado.append(nodo.getItem()).append("\n");
+		resultado.append(percorrer(nodo.getDireita()));
+		return resultado.toString();
 	}
 
 	@Override
@@ -176,8 +240,11 @@ public class ABB<K, V> implements IMapeamento<K, V> {
 	 * @return o valor associado ao item removido.
 	 */
 	public V remover(K chave) {
-		// TODO
-		return null;
+		if (chave == null)
+			throw new IllegalArgumentException("Chave de remoção não pode ser null");
+		V item = pesquisar(chave);
+		this.raiz = remover(this.raiz, chave);
+		return item;
 	}
 
 	public Lista<V> recortar(K chaveDeOnde, K chaveAteOnde) {
@@ -201,19 +268,16 @@ public class ABB<K, V> implements IMapeamento<K, V> {
 
 		int cmpStart = comparador.compare(nodo.getChave(), start);
 		if (cmpStart < 0) {
-			// nodo.chave < start -> toda subárvore esquerda < start, pular esquerda
 			recortarRec(nodo.getDireita(), start, end, out);
 			return;
 		}
 
 		int cmpEnd = comparador.compare(nodo.getChave(), end);
 		if (cmpEnd > 0) {
-			// nodo.chave > end -> toda subárvore direita > end, pular direita
 			recortarRec(nodo.getEsquerda(), start, end, out);
 			return;
 		}
 
-		// nodo.chave está dentro do intervalo
 		recortarRec(nodo.getEsquerda(), start, end, out);
 		out.inserir(nodo.getItem());
 		recortarRec(nodo.getDireita(), start, end, out);

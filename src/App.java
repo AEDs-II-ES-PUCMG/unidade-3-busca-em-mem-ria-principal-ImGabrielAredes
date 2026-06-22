@@ -1,9 +1,12 @@
+import java.io.File;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.charset.Charset;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Scanner;
 import java.util.function.Function;
-import java.io.File;
-import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 
 public class App {
@@ -22,6 +25,8 @@ public class App {
     static ABB<String, Produto> produtosCadastradosPorNome;
 
     static ABB<Integer, Produto> produtosCadastradosPorId;
+
+    static Map<Produto, Lista<Pedido>> pedidosPorProduto = new HashMap<>();
 
     static void limparTela() {
         System.out.print("\033[H\033[2J");
@@ -68,9 +73,18 @@ public class App {
         System.out.println("5 - Remover produto, por id");
         System.out.println("6 - Recortar a lista de produtos, por nome");
         System.out.println("7 - Recortar a lista de produtos, por id");
+        System.out.println("8 - Gerar relatório de pedidos de um produto");
         System.out.println("0 - Finalizar");
 
-        return lerOpcao("Digite sua opção: ", Integer.class);
+        Integer opcao;
+        do {
+            opcao = lerOpcao("Digite sua opção: ", Integer.class);
+            if (opcao == null || opcao < 0 || opcao > 8) {
+                System.out.println("Opção inválida. Digite um número entre 0 e 8.");
+            }
+        } while (opcao == null || opcao < 0 || opcao > 8);
+
+        return opcao;
     }
 
     /**
@@ -87,39 +101,45 @@ public class App {
      */
     static <K> ABB<K, Produto> lerProdutos(String nomeArquivoDados, Function<Produto, K> extratorDeChave) {
 
-        Scanner arquivo = null;
+        ABB<K, Produto> produtosCadastrados = new ABB<>();
         int numProdutos;
         String linha;
-        Produto produto;
-        ABB<K, Produto> produtosCadastrados;
 
-        try {
-            arquivo = new Scanner(new File(nomeArquivoDados), Charset.forName("UTF-8"));
-
+        try (Scanner arquivo = new Scanner(new File(nomeArquivoDados), Charset.forName("UTF-8"))) {
             numProdutos = Integer.parseInt(arquivo.nextLine());
-            produtosCadastrados = new ABB<K, Produto>();
 
             for (int i = 0; i < numProdutos; i++) {
+                if (!arquivo.hasNextLine()) {
+                    System.out.printf("Arquivo de produtos incompleto: esperava %d produtos e encontrou %d.%n",
+                            numProdutos, i);
+                    break;
+                }
                 linha = arquivo.nextLine();
-                produto = Produto.criarDoTexto(linha);
-                K chave = extratorDeChave.apply(produto);
-                produtosCadastrados.inserir(chave, produto);
+                try {
+                    Produto produto = Produto.criarDoTexto(linha);
+                    K chave = extratorDeChave.apply(produto);
+                    produtosCadastrados.inserir(chave, produto);
+                } catch (IllegalArgumentException | ArrayIndexOutOfBoundsException e) {
+                    System.out.printf("Linha %d inválida e foi ignorada: %s%n", i + 2, e.getMessage());
+                }
             }
-            quantosProdutos = numProdutos;
-
-        } catch (IOException excecaoArquivo) {
-            produtosCadastrados = null;
-        } finally {
-            arquivo.close();
+            quantosProdutos = produtosCadastrados.tamanho();
+        } catch (IOException e) {
+            System.out.println("Erro ao abrir o arquivo de produtos: " + e.getMessage());
+        } catch (NumberFormatException | java.util.NoSuchElementException e) {
+            System.out.println("Formato inválido no arquivo de produtos: " + e.getMessage());
         }
 
         return produtosCadastrados;
     }
 
     static <K> Produto localizarProduto(ABB<K, Produto> produtosCadastrados, K procurado) {
+        if (produtosCadastrados == null || procurado == null) {
+            return null;
+        }
         try {
             return produtosCadastrados.pesquisar(procurado);
-        } catch (NoSuchElementException e) {
+        } catch (NoSuchElementException | IllegalArgumentException e) {
             return null;
         }
     }
@@ -145,9 +165,9 @@ public class App {
     static Produto localizarProdutoNome(ABB<String, Produto> produtosCadastrados) {
         System.out.println("Digite o nome do produto: ");
         String nome = teclado.nextLine();
-        if (nome == null)
+        if (nome == null || nome.trim().isEmpty())
             return null;
-        nome = nome.toLowerCase();
+        nome = nome.trim().toLowerCase();
         return localizarProduto(produtosCadastrados, nome);
     }
 
@@ -192,16 +212,16 @@ public class App {
     static Produto removerProdutoNome(ABB<String, Produto> produtosCadastrados) {
         System.out.println("Digite o nome do produto: ");
         String nome = teclado.nextLine();
-        if (nome == null)
+        if (nome == null || nome.trim().isEmpty())
             return null;
-        nome = nome.toLowerCase();
+        nome = nome.trim().toLowerCase();
         return removerProduto(produtosCadastrados, nome);
     }
 
     static <K> Produto removerProduto(ABB<K, Produto> produtosCadastrados, K chave) {
         try {
             return produtosCadastrados.remover(chave);
-        } catch (NoSuchElementException e) {
+        } catch (NoSuchElementException | IllegalArgumentException e) {
             return null;
         }
     }
@@ -223,10 +243,12 @@ public class App {
         String de = teclado.nextLine();
         System.out.println("Digite o nome final do intervalo: ");
         String ate = teclado.nextLine();
-        if (de == null || ate == null)
+        if (de == null || ate == null || de.trim().isEmpty() || ate.trim().isEmpty()) {
+            System.out.println("Intervalo inválido: nome inicial e final não podem ser vazios.");
             return;
-        de = de.toLowerCase();
-        ate = ate.toLowerCase();
+        }
+        de = de.trim().toLowerCase();
+        ate = ate.trim().toLowerCase();
         recortarProduto(produtosCadastrados, de, ate);
     }
 
@@ -240,10 +262,55 @@ public class App {
         recortarProduto(produtosCadastrados, de, ate);
     }
 
+    private static void inserirNaTabela(Produto produto, Pedido pedido) {
+        if (produto == null || pedido == null) {
+            return;
+        }
+
+        Lista<Pedido> pedidos = pedidosPorProduto.get(produto);
+        if (pedidos == null) {
+            pedidos = new Lista<>();
+            pedidosPorProduto.put(produto, pedidos);
+        }
+        pedidos.inserir(pedido);
+    }
+
+    static void pedidosDoProduto() {
+        Produto produto = localizarProdutoNome(produtosCadastradosPorNome);
+        if (produto == null) {
+            cabecalho();
+            System.out.println("Produto não encontrado.");
+            return;
+        }
+
+        Lista<Pedido> pedidos = pedidosPorProduto.get(produto);
+        if (pedidos == null || pedidos.vazia()) {
+            cabecalho();
+            System.out.println("Não há pedidos registrados para este produto.");
+            return;
+        }
+
+        String nomeArquivo = String.format("pedidos_produto_%d.txt", produto.hashCode());
+        try (PrintWriter escritor = new PrintWriter(new File(nomeArquivo), "UTF-8")) {
+            escritor.println("RELATÓRIO DE PEDIDOS DO PRODUTO");
+            escritor.println(produto.toString());
+            escritor.println("--------------------------------------------------");
+            escritor.println(pedidos.toString());
+            cabecalho();
+            System.out.println("Relatório gerado em: " + nomeArquivo);
+        } catch (IOException e) {
+            cabecalho();
+            System.out.println("Erro ao gerar o relatório de pedidos: " + e.getMessage());
+        }
+    }
+
     public static void main(String[] args) {
         teclado = new Scanner(System.in, Charset.forName("UTF-8"));
         nomeArquivoDados = "produtos.txt";
-        produtosCadastradosPorNome = lerProdutos(nomeArquivoDados, (p -> p.descricao));
+        produtosCadastradosPorNome = lerProdutos(nomeArquivoDados, (p -> p.descricao.toLowerCase()));
+        if (produtosCadastradosPorNome == null) {
+            produtosCadastradosPorNome = new ABB<>();
+        }
         produtosCadastradosPorId = new ABB<Integer, Produto>(produtosCadastradosPorNome, (p -> p.idProduto));
 
         int opcao = -1;
@@ -258,6 +325,7 @@ public class App {
                 case 5 -> mostrarProduto(removerProdutoId(produtosCadastradosPorId));
                 case 6 -> recortarProdutosNome(produtosCadastradosPorNome);
                 case 7 -> recortarProdutosId(produtosCadastradosPorId);
+                case 8 -> pedidosDoProduto();
                 case 0 -> System.out.println("FLW VLW OBG VLT SMP.");
             }
             pausa();
